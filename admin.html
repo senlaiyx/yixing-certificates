@@ -1,18 +1,173 @@
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
-const firebaseConfig = {
-  apiKey: "AIzaSyBuM-hUj6HvjI-KObl4_9InuvoEN9Nnny4",
-  authDomain: "yixing-certificates.firebaseapp.com",
-  projectId: "yixing-certificates",
-  storageBucket: "yixing-certificates.firebasestorage.app",
-  messagingSenderId: "216581291336",
-  appId: "1:216581291336:web:491c89aeea5a9a1143c77d",
-  measurementId: "G-XH8DSCWBYT"
-};
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Yi Xing Goldsmith - Certificate Admin</title>
+  <link rel="stylesheet" href="style.css">
+  <!-- Include QRCode generator library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <h1>Yi Xing Goldsmith Admin Dashboard</h1>
+    
+    <div class="tabs">
+      <button onclick="switchTab('generator')">Issue Certificate</button>
+      <button onclick="switchTab('templates')">Manage Templates</button>
+      <button onclick="switchTab('list')">View All Issued</button>
+    </div>
 
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-import { getFirestore } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-import { getStorage } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js";
+    <!-- TAB 1: GENERATE CERTIFICATE -->
+    <div id="generator-tab" class="tab-content">
+      <h2>Generate New Certificate</h2>
+      <form id="cert-form">
+        <label>Select Product Template:</label>
+        <select id="template-select" required></select>
 
-const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app);
-export const storage = getStorage(app);
+        <label>Certificate Number (e.g. E126801):</label>
+        <input type="text" id="cert-number" required placeholder="E126801">
+
+        <button type="submit" class="btn">Generate & Save Certificate</button>
+      </form>
+      <div id="result-area" style="display:none; margin-top: 20px;">
+        <h3>Success! Certificate Generated.</h3>
+        <p>Verification Link: <a id="gen-link" target="_blank"></a></p>
+        <div id="qrcode" style="margin: 10px 0;"></div>
+      </div>
+    </div>
+
+    <!-- TAB 2: MANAGE TEMPLATES -->
+    <div id="templates-tab" class="tab-content" style="display:none;">
+      <h2>Add Product Template</h2>
+      <form id="template-form">
+        <label>Template Name (e.g., 1kg Gold Bar):</label>
+        <input type="text" id="t-name" required>
+
+        <label>Weight:</label>
+        <input type="text" id="t-weight" value="1000g" required>
+
+        <label>Width:</label>
+        <input type="text" id="t-width" value="52mm" required>
+
+        <label>Length:</label>
+        <input type="text" id="t-length" value="114mm" required>
+
+        <label>Thickness:</label>
+        <input type="text" id="t-thickness" value="9.5mm" required>
+
+        <label>Fineness:</label>
+        <input type="text" id="t-fineness" value="Au999.9" required>
+
+        <label>Certificate Assayer:</label>
+        <input type="text" id="t-assayer" value="Emas Assayer" required>
+
+        <button type="submit" class="btn">Save Template</button>
+      </form>
+    </div>
+
+    <!-- TAB 3: VIEW ALL ISSUED -->
+    <div id="list-tab" class="tab-content" style="display:none;">
+      <h2>Issued Certificates</h2>
+      <table id="cert-table">
+        <thead>
+          <tr>
+            <th>Cert Number</th>
+            <th>Product Template</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script type="module">
+    import { db } from './firebase-config.js';
+    import { collection, addDb, getDocs, doc, setDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+    // Tab switcher helper
+    window.switchTab = function(tabName) {
+      document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+      document.getElementById(tabName + '-tab').style.display = 'block';
+      if(tabName === 'list') loadCertificates();
+      if(tabName === 'generator') loadTemplatesDropdown();
+    }
+
+    // Load templates into dropdown
+    async function loadTemplatesDropdown() {
+      const select = document.getElementById('template-select');
+      select.innerHTML = '<option value="">Select a template...</option>';
+      const snapshot = await getDocs(collection(db, "templates"));
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        select.innerHTML += `<option value="${docSnap.id}">${data.name} (${data.weight})</option>`;
+      });
+    }
+
+    // Save Template
+    document.getElementById('template-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const name = document.getElementById('t-name').value;
+      const templateData = {
+        name,
+        weight: document.getElementById('t-weight').value,
+        width: document.getElementById('t-width').value,
+        length: document.getElementById('t-length').value,
+        thickness: document.getElementById('t-thickness').value,
+        fineness: document.getElementById('t-fineness').value,
+        assayer: document.getElementById('t-assayer').value
+      };
+      await setDoc(doc(db, "templates", name), templateData);
+      alert('Template saved successfully!');
+      document.getElementById('template-form').reset();
+    });
+
+    // Generate & Save Certificate Record
+    document.getElementById('cert-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const templateId = document.getElementById('template-select').value;
+      const certNumber = document.getElementById('cert-number').value.trim();
+      
+      // Save metadata to Firestore using certNumber as the document ID
+      const certData = {
+        certNumber,
+        templateId,
+        createdAt: new Date().toISOString()
+      };
+
+      await setDoc(doc(db, "certificates", certNumber), certData);
+
+      // Construct verification URL pointing to your verify page
+      const verifyUrl = `${window.location.origin}/verify.html?id=${certNumber}`;
+      
+      document.getElementById('result-area').style.display = 'block';
+      document.getElementById('gen-link').href = verifyUrl;
+      document.getElementById('gen-link').innerText = verifyUrl;
+
+      // Render QR Code UI
+      const qrContainer = document.getElementById('qrcode');
+      qrContainer.innerHTML = "";
+      new QRCode(qrContainer, { text: verifyUrl, width: 128, height: 128 });
+    });
+
+    // Load list of certificates
+    async function loadCertificates() {
+      const tbody = document.querySelector('#cert-table tbody');
+      tbody.innerHTML = '';
+      const querySnapshot = await getDocs(collection(db, "certificates"));
+      querySnapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        tbody.innerHTML += `
+          <tr>
+            <td>${data.certNumber}</td>
+            <td>${data.templateId}</td>
+            <td><a href="verify.html?id=${data.certNumber}" target="_blank">View Page</a></td>
+          </tr>`;
+      });
+    }
+
+    // Initial load
+    loadTemplatesDropdown();
+  </script>
+</body>
+</html>
